@@ -17,3 +17,5 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.READ_PACKAGES_TOKEN }}
       - run: bunx tsc -b plugins/e2ee/tsconfig.json
+      # Lint only, with the template's biome.json. Formatting is not enforced.
+      - run: bunx biome lint plugins/e2ee/js
