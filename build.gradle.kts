@@ -208,6 +208,7 @@ configure(subprojects.filter { project -> pluginRoots.any { project.path.startsW
             layout.buildDirectory.dir("intermediates/built_in_kotlinc/release/compileReleaseKotlin/classes"),
             layout.buildDirectory.dir("tmp/kotlin-classes/release"),
             layout.buildDirectory.dir("intermediates/javac/release/classes"),
+            tasks.named<JavaCompile>("compileReleaseJavaWithJavac").flatMap { it.destinationDirectory },
         )
         inputs.files(classDirs).withPropertyName("classDirs").optional()
 
