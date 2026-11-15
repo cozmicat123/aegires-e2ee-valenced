@@ -24,6 +24,7 @@ declare module '@valenced/modules/native' {
                 'cozmicat123.e2ee.setKey': [args: [password: string], returnValue: boolean]
                 'cozmicat123.e2ee.clearKey': [args: [], returnValue: null]
                 'cozmicat123.e2ee.hasKey': [args: [], returnValue: boolean]
+                'cozmicat123.e2ee.status': [args: [], returnValue: string]
                 'cozmicat123.e2ee.encrypt': [
                         args: [channelId: string, plain: string, selfId: string | null],
                         returnValue: { text: string | null; error: string | null } | null,
@@ -49,6 +50,9 @@ interface FluxMessage {
         referenced_message?: FluxMessage | null
 }
 
+// TEMP diagnostics (AI glue), removed before release
+export const dbg = { hooks: '', send: 0, edit: 0, flux: 0, cache: '', last: '' }
+
 // Ids of messages that were sent encrypted (Aegires Message.encrypted). Capped so it cannot grow forever.
 const encryptedIds = new Set<string>()
 const MAX_IDS = 5000
@@ -70,7 +74,13 @@ function decryptMessages(messages: FluxMessage[], fallbackChannel?: string) {
                 add(m.referenced_message, m.channel_id ?? fallbackChannel, false)
         }
         if (!items.length) return
-        const out = callNativeMethodSync('cozmicat123.e2ee.decrypt', [items])
+        let out: { text: string | null; enc: boolean }[]
+        try {
+                out = callNativeMethodSync('cozmicat123.e2ee.decrypt', [items])
+        } catch (e) {
+                dbg.last = `decrypt: ${e}`
+                return
+        }
         out.forEach(({ text, enc }, i) => {
                 if (text !== null) targets[i].content = text
                 const id = targets[i].id
@@ -104,8 +114,10 @@ export default plugin<{ jsonStorage: Settings }>({
                 }
 
                 // Fails closed: returns false when the message must not be sent
+                dbg.hooks = `startedLate=${plugin.startedLate}`
                 const encryptOutgoing = (channelId: string, data: { content?: string } | undefined) => {
                         const plain = data?.content?.trim()
+                        dbg.cache = JSON.stringify(storage.cache)
                         if (!data || !plain) return true
                         callNativeMethodSync('cozmicat123.e2ee.configure', [
                                 !!storage.cache?.enabled,
@@ -126,10 +138,12 @@ export default plugin<{ jsonStorage: Settings }>({
                         getModules(withProps<MessageActions>('sendMessage', 'editMessage'), messages => {
                                 cleanup(
                                         instead(messages, 'sendMessage', function (args, original) {
+                                                dbg.send++
                                                 if (!encryptOutgoing(args[0], args[1])) return
                                                 return Reflect.apply(original, this, args)
                                         }),
                                         instead(messages, 'editMessage', function (args, original) {
+                                                dbg.edit++
                                                 if (!encryptOutgoing(args[0], args[2])) return
                                                 return Reflect.apply(original, this, args)
                                         }),
@@ -152,6 +166,7 @@ export default plugin<{ jsonStorage: Settings }>({
 
                 cleanup(
                         onFluxEventDispatched('MESSAGE_CREATE', evt => {
+                                dbg.flux++
                                 if ((evt as any)?.message) decryptMessages([(evt as any).message])
                                 return evt
                         }),
@@ -161,6 +176,7 @@ export default plugin<{ jsonStorage: Settings }>({
                         }),
                         onFluxEventDispatched('LOAD_MESSAGES_SUCCESS', evt => {
                                 const e = evt as any
+                                dbg.flux++
                                 if (Array.isArray(e?.messages)) decryptMessages(e.messages, e.channelId)
                                 return evt
                         }),

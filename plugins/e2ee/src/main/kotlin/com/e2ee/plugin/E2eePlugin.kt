@@ -17,6 +17,15 @@ private object E2ee {
     @Volatile var enabled = false
     @Volatile var preset: Crypto.Preset = Crypto.Preset.AES256
 
+    // TEMP diagnostics (AI glue), removed before release
+    @Volatile var decCalls = 0
+    @Volatile var decEnc = 0
+    @Volatile var decNoKey = 0
+    @Volatile var decFail = 0
+    @Volatile var encCalls = 0
+    @Volatile var encOff = 0
+    @Volatile var lastErr = ""
+
     // Forced-channel keys are derived once per channel; never start two 64 MiB derivations for one channel
     private val preparing = ConcurrentHashMap.newKeySet<String>()
 
@@ -74,17 +83,26 @@ val e2eePlugin = plugin {
             Unit
         }
 
+        registerNativeMethod("$id.status") { _ ->
+            "enabled=${E2ee.enabled} preset=${E2ee.preset.label} key=${E2ee.key != null} " +
+                "dec=${E2ee.decCalls} looksEnc=${E2ee.decEnc} noKey=${E2ee.decNoKey} fail=${E2ee.decFail} " +
+                "enc=${E2ee.encCalls} off=${E2ee.encOff} last=${E2ee.lastErr}"
+        }
+
         registerNativeMethod("$id.hasKey") { _ -> E2ee.key != null }
 
         // [channelId, plain, selfId?] -> { text?: String, error?: String }, or null when encryption is off for the channel
         registerNativeMethod("$id.encrypt") { args ->
             val channelId = args[0] as String
             val plain = args[1] as String
+            E2ee.encCalls++
+            if (!E2ee.encryptOn(channelId)) E2ee.encOff++
             // Same as Aliucord encryptOutgoing: never double-encrypt
             if (!E2ee.encryptOn(channelId) || Crypto.looksEncrypted(plain)) {
                 null
             } else {
                 val (text, error) = E2ee.encryptText(channelId, plain, args[2] as String?)
+                E2ee.lastErr = error ?: "enc ok"
                 mapOf("text" to text, "error" to error)
             }
         }
@@ -96,7 +114,11 @@ val e2eePlugin = plugin {
                 val (content, channelId, author) = (item as List<*>)
                 val enc = content is String && Crypto.looksEncrypted(content)
                 val k = E2ee.keyFor(channelId as String)
+                E2ee.decCalls++
+                if (enc) E2ee.decEnc++
+                if (enc && k == null) E2ee.decNoKey++
                 val text = if (k == null || !enc) null else Crypto.decrypt(content as String, k, channelId, author as String?)
+                if (enc && k != null && text == null) E2ee.decFail++
                 mapOf("text" to text, "enc" to enc)
             }
         }

@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react'
 import { ScrollView, Text } from 'react-native'
 import type { PluginSettingsComponent } from '@valenced/plugins/types'
 import type { ComponentProps } from 'react'
+import { dbg } from '.'
 import type { Settings } from '.'
 
 const { Button, Stack, TableRadioGroup, TableRadioRow, TableRowGroup, TableSwitchRow, TextInput } = Design
@@ -22,6 +23,7 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
         const [error, setError] = useState('')
         const [hasKey, setHasKey] = useState(false)
         const [busy, setBusy] = useState(false)
+        const [diag, setDiag] = useState('')
 
         useEffect(() => {
                 callNativeMethod('cozmicat123.e2ee.hasKey', []).then(setHasKey, e => setError(String(e)))
@@ -68,6 +70,16 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
                                                         setHasKey(false)
                                                 }}
                                         />
+                                        <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                text="Diagnostics"
+                                                onPress={async () => {
+                                                        const n = await callNativeMethod('cozmicat123.e2ee.status', [])
+                                                        setDiag(`${n}\njs: ${JSON.stringify(dbg)}`)
+                                                }}
+                                        />
+                                        <Text>{diag}</Text>
                                         <Text>{hasKey ? 'Key set (kept in memory only).' : 'No key set.'}</Text>
                                 </Stack>
                                 <TableRowGroup title="Encryption">
