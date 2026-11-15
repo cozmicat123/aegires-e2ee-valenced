@@ -11,7 +11,7 @@ import { getModules } from '@valenced/modules/finders'
 import { withName, withProps } from '@valenced/modules/finders/filters'
 import { callNativeMethod, callNativeMethodSync } from '@valenced/modules/native'
 import { after, before, instead } from '@valenced/patcher'
-import { decryptMessages, encryptedIds } from './messages'
+import { decryptMessages, encrypted } from './messages'
 import SettingsComponent from './settings'
 
 export interface Settings {
@@ -127,7 +127,7 @@ export default plugin<{ jsonStorage: Settings }>({
                                         }),
                                         after(prototype, 'generate', row => {
                                                 const m = row?.type === MessageRowType ? row.message : undefined
-                                                if (!m?.id || m.username == null || !encryptedIds.has(m.id)) return row
+                                                if (!m?.id || m.username == null || !encrypted.has(m.id)) return row
                                                 return { ...row, message: { ...m, username: LOCK + m.username } }
                                         }),
                                 )

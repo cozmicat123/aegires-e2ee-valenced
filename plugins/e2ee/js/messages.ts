@@ -14,9 +14,10 @@ export interface FluxMessage {
         referenced_message?: FluxMessage | null
 }
 
-// Ids of messages that were sent encrypted (Aegires Message.encrypted). Capped so it cannot grow forever.
-export const encryptedIds = new Set<string>()
-const MAX_IDS = 5000
+// Messages that were sent encrypted (Aegires Message.encrypted): id -> original ciphertext. The ciphertext is kept because
+// decrypting replaces the content in place, and a wrong key or Clear key must be able to lock the row again. Capped.
+export const encrypted = new Map<string, string>()
+const MAX_ENCRYPTED = 2000
 
 // Same test as Crypto.looksEncrypted (Crypto.java: PREFIX line 65, looksEncrypted 83-85; pinned dddead0 "\u00A7"). Checked here so plain rows never cross the bridge.
 const looksEncrypted = (s: unknown): s is string => typeof s === 'string' && s.startsWith('\u00A7')
@@ -49,14 +50,14 @@ export function decryptMessages(messages: FluxMessage[], fallbackChannel?: strin
                 if (text !== null) targets[i].content = text
                 const id = targets[i].id
                 if (enc && isMain[i] && id) {
-                        encryptedIds.add(id)
-                        if (encryptedIds.size > MAX_IDS) encryptedIds.delete(encryptedIds.values().next().value!)
+                        encrypted.set(id, items[i][0] as string)
+                        if (encrypted.size > MAX_ENCRYPTED) encrypted.delete(encrypted.keys().next().value!)
                 }
         })
 }
 
 // Rows keep what they were first built with, so a new key alone changes nothing (valid-user redrawMentions has the same
-// problem). Decrypt the loaded messages of the open channel and send the result back as a MESSAGE_UPDATE.
+// problem). Decrypt the loaded messages of the open channel with the current key and send the result back as a MESSAGE_UPDATE.
 export function redecrypt() {
         const SelectedChannelStore = Stores.SelectedChannelStore as DiscordModules.Flux.Store<{
                 getChannelId(): string | undefined
@@ -68,8 +69,11 @@ export function redecrypt() {
                 getMessages(channelId: string): { toArray(): FluxMessage[] }
         }>
         for (const { id, content, author } of MessageStore.getMessages(channelId).toArray()) {
-                if (!id || !looksEncrypted(content)) continue
-                const copy: FluxMessage = { id, content, channel_id: channelId, author: { id: author?.id } }
+                // Plain rows have no ciphertext. Already-decrypted rows go back through theirs, so a wrong key or
+                // Clear key shows them locked again, as in Aegires.
+                const cipher = looksEncrypted(content) ? content : id ? encrypted.get(id) : undefined
+                if (!id || !cipher) continue
+                const copy: FluxMessage = { id, content: cipher, channel_id: channelId, author: { id: author?.id } }
                 decryptMessages([copy])
                 if (copy.content === content) continue
                 Dispatcher.dispatch({

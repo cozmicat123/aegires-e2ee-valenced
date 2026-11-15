@@ -72,7 +72,7 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
                                                 size="sm"
                                                 text="Clear key"
                                                 onPress={() => {
-                                                        callNativeMethod('cozmicat123.e2ee.clearKey', [])
+                                                        callNativeMethod('cozmicat123.e2ee.clearKey', []).then(() => redecrypt())
                                                         setHasKey(false)
                                                         storage.set({ enabled: false })
                                                 }}
