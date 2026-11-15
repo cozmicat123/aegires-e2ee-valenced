@@ -143,7 +143,9 @@ export default plugin<{ jsonStorage: Settings }>({
                 // the settings page does not let it be turned on without a key.
                 // cache may not be loaded yet here, so read through get() as fake-nitro fakeify.ts:40 does
                 storage.get().then(
-                        s => s.enabled && storage.set({ enabled: false }),
+                        s => {
+                                if (s.enabled) storage.set({ enabled: false })
+                        },
                         e => plugin.reportError(e),
                 )
 
