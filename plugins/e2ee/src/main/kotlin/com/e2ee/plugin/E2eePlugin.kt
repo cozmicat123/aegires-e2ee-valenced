@@ -79,10 +79,12 @@ val e2eePlugin = plugin {
         // [channelId, plain, selfId?] -> { text?: String, error?: String }, or null when encryption is off for the channel
         registerNativeMethod("$id.encrypt") { args ->
             val channelId = args[0] as String
-            if (!E2ee.encryptOn(channelId)) {
+            val plain = args[1] as String
+            // Same as Aliucord encryptOutgoing: never double-encrypt
+            if (!E2ee.encryptOn(channelId) || Crypto.looksEncrypted(plain)) {
                 null
             } else {
-                val (text, error) = E2ee.encryptText(channelId, args[1] as String, args[2] as String?)
+                val (text, error) = E2ee.encryptText(channelId, plain, args[2] as String?)
                 mapOf("text" to text, "error" to error)
             }
         }

@@ -1,0 +1,129 @@
+// AI-written glue (v1). Hook shapes copied from human Valenced plugins:
+//  - send/edit `instead` hooks: valenced-community-plugins fake-nitro/src/patches/expressions/fakeify.ts:138-158
+//  - module lookup: gif-to-chat-input/index.ts:27-35
+//  - Flux payload rewrite: clear-urls/index.tsx:64-71, event shapes from klipy-gif-fix/js/index.ts:335-338
+//  - jsonStorage wiring: anonymous-file-names/js/index.ts:41-47
+// Behaviour mirrors cozmicat123/aliucord-e2ee@aegires-sync E2eePlugin.kt (Aegires MessageCryptoHelper).
+import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
+import { getModules } from '@valenced/modules/finders'
+import { withProps } from '@valenced/modules/finders/filters'
+import { callNativeMethod, callNativeMethodSync } from '@valenced/modules/native'
+import { instead } from '@valenced/patcher'
+import SettingsComponent from './settings'
+
+export interface Settings {
+        enabled: boolean
+        preset: number // Crypto.Preset index: 0 = AES-128, 1 = AES-192, 2 = AES-256
+}
+
+export const ID = 'cozmicat123.e2ee'
+
+declare module '@valenced/modules/native' {
+        interface NativeMethods {
+                'cozmicat123.e2ee.configure': [args: [enabled: boolean, preset: number], returnValue: null]
+                'cozmicat123.e2ee.setKey': [args: [password: string], returnValue: boolean]
+                'cozmicat123.e2ee.clearKey': [args: [], returnValue: null]
+                'cozmicat123.e2ee.hasKey': [args: [], returnValue: boolean]
+                'cozmicat123.e2ee.encrypt': [
+                        args: [channelId: string, plain: string, selfId: string | null],
+                        returnValue: { text: string | null; error: string | null } | null,
+                ]
+                'cozmicat123.e2ee.decrypt': [
+                        args: [items: [content: unknown, channelId: string, authorId: string | null][]],
+                        returnValue: (string | null)[],
+                ]
+        }
+}
+
+interface MessageActions {
+        sendMessage(channelId: string, message: { content: string }, clearDraft: boolean, options?: object): unknown
+        editMessage(channelId: string, messageId: string, message: { content: string }): unknown
+}
+
+// Flux message objects (snake_case, as sent by the gateway)
+interface FluxMessage {
+        content?: string
+        channel_id?: string
+        author?: { id?: string }
+        referenced_message?: FluxMessage | null
+}
+
+// Replace encrypted content in place. The message and its reply preview go in one native call.
+function decryptMessages(messages: FluxMessage[], fallbackChannel?: string) {
+        const targets: FluxMessage[] = []
+        const items: [unknown, string, string | null][] = []
+        const add = (m: FluxMessage | null | undefined, channel?: string) => {
+                const channelId = m?.channel_id ?? channel
+                if (!m || !channelId) return
+                targets.push(m)
+                items.push([m.content, channelId, m.author?.id ?? null])
+        }
+        for (const m of messages) {
+                add(m, fallbackChannel)
+                add(m.referenced_message, m.channel_id ?? fallbackChannel)
+        }
+        if (!items.length) return
+        const out = callNativeMethodSync('cozmicat123.e2ee.decrypt', [items])
+        out.forEach((plain, i) => {
+                if (plain !== null) targets[i].content = plain
+        })
+}
+
+export default plugin<{ jsonStorage: Settings }>({
+        jsonStorage: { load: true, default: { enabled: false, preset: 2 } },
+        start({ cleanup, jsonStorage: storage, plugin }) {
+                // Fails closed: returns false when the message must not be sent
+                const encryptOutgoing = (channelId: string, data: { content?: string } | undefined) => {
+                        const plain = data?.content?.trim()
+                        if (!data || !plain) return true
+                        callNativeMethodSync('cozmicat123.e2ee.configure', [
+                                !!storage.cache?.enabled,
+                                storage.cache?.preset ?? 2,
+                        ])
+                        const selfId = (Stores as any).UserStore?.getCurrentUser?.()?.id ?? null
+                        const res = callNativeMethodSync('cozmicat123.e2ee.encrypt', [channelId, plain, selfId])
+                        if (res === null) return true // encryption off for this channel
+                        if (res.error || !res.text) {
+                                plugin.reportError(res.error ?? 'Encryption failed')
+                                return false
+                        }
+                        data.content = res.text
+                        return true
+                }
+
+                cleanup(
+                        getModules(withProps<MessageActions>('sendMessage', 'editMessage'), messages => {
+                                cleanup(
+                                        instead(messages, 'sendMessage', function (args, original) {
+                                                if (!encryptOutgoing(args[0], args[1])) return
+                                                return Reflect.apply(original, this, args)
+                                        }),
+                                        instead(messages, 'editMessage', function (args, original) {
+                                                if (!encryptOutgoing(args[0], args[2])) return
+                                                return Reflect.apply(original, this, args)
+                                        }),
+                                )
+                        }),
+                )
+
+                cleanup(
+                        onFluxEventDispatched('MESSAGE_CREATE', evt => {
+                                if ((evt as any)?.message) decryptMessages([(evt as any).message])
+                                return evt
+                        }),
+                        onFluxEventDispatched('MESSAGE_UPDATE', evt => {
+                                if ((evt as any)?.message) decryptMessages([(evt as any).message])
+                                return evt
+                        }),
+                        onFluxEventDispatched('LOAD_MESSAGES_SUCCESS', evt => {
+                                const e = evt as any
+                                if (Array.isArray(e?.messages)) decryptMessages(e.messages, e.channelId)
+                                return evt
+                        }),
+                )
+        },
+        stop() {
+                callNativeMethod('cozmicat123.e2ee.clearKey', [])
+        },
+        SettingsComponent,
+})

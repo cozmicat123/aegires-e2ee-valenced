@@ -6,10 +6,13 @@
   "author": "cozmicat123",
   "version": "0.1.0",
   "dependencies": {
-    "valenced.api": ">=1 <2",
-    "discord": "*"
+    "valenced.api": { "version": ">=1 <2" },
+    "discord": { "version": "*" },
+    "valenced.settings": {},
+    "valenced.settings.plugins": {}
   },
   "dist": {
+    "script": "index.js",
     "android": {
       "path": "plugin.jar",
       "class": "com.e2ee.plugin.E2eePlugin"
