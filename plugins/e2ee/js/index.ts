@@ -1,9 +1,10 @@
 // AI-written glue (v1). Hook shapes copied from human Valenced plugins:
 //  - send/edit `instead` hooks: valenced-community-plugins fake-nitro/src/patches/expressions/fakeify.ts:138-158
 //  - module lookup: gif-to-chat-input/index.ts:27-35
-//  - Flux payload rewrite: clear-urls/index.tsx:64-71, event shapes from klipy-gif-fix/js/index.ts:335-338
-//  - jsonStorage wiring: anonymous-file-names/js/index.ts:41-47
-//  - redecrypt after Set key: valid-user/js/index.ts:51-80 (redrawMentions)
+//  - Flux payload rewrite: clear-urls/index.tsx:104-111 (MESSAGE_CREATE). The LOAD_MESSAGES_SUCCESS shape ({ messages, channelId })
+//    has no human source; it is only verified by working on device
+//  - jsonStorage wiring: anonymous-file-names/js/index.ts:39-44
+//  - redecrypt after Set key: valid-user/js/index.ts:54-83 (redrawMentions)
 // Behaviour mirrors cozmicat123/aliucord-e2ee@aegires-sync E2eePlugin.kt (Aegires MessageCryptoHelper).
 import { Dispatcher } from '@valenced/discord/common/flux'
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
@@ -56,7 +57,7 @@ interface FluxMessage {
 const encryptedIds = new Set<string>()
 const MAX_IDS = 5000
 
-// Same test as Crypto.looksEncrypted (Crypto.java:35-37, PREFIX = "\u00A7"). Checked here so plain rows never cross the bridge.
+// Same test as Crypto.looksEncrypted (Crypto.java: PREFIX line 65, looksEncrypted 83-85; pinned dddead0 "\u00A7"). Checked here so plain rows never cross the bridge.
 const looksEncrypted = (s: unknown): s is string => typeof s === 'string' && s.startsWith('\u00A7')
 
 // Replace encrypted content in place. The message and its reply preview go in one native call.
@@ -133,6 +134,10 @@ interface MessageRow {
 export default plugin<{ jsonStorage: Settings }>({
         jsonStorage: { load: true, default: { enabled: false, preset: 2 } },
         start({ cleanup, jsonStorage: storage, plugin }) {
+                // The key lives in native memory only, so after a restart there is none. Start with encryption off;
+                // the settings page does not let it be turned on without a key.
+                if (storage.cache?.enabled) storage.set({ enabled: false })
+
                 // The row hook needs the message list to be built after it is installed
                 if (plugin.startedLate) {
                         plugin.requireReload()
@@ -162,11 +167,12 @@ export default plugin<{ jsonStorage: Settings }>({
                         getModules(withProps<MessageActions>('sendMessage', 'editMessage'), messages => {
                                 cleanup(
                                         instead(messages, 'sendMessage', function (args, original) {
-                                                if (!encryptOutgoing(args[0], args[1])) return
+                                                // Blocked: return a promise like the async sendMessage hooks in fake-nitro fakeify.ts:39,59
+                                                if (!encryptOutgoing(args[0], args[1])) return Promise.resolve()
                                                 return Reflect.apply(original, this, args)
                                         }),
                                         instead(messages, 'editMessage', function (args, original) {
-                                                if (!encryptOutgoing(args[0], args[2])) return
+                                                if (!encryptOutgoing(args[0], args[2])) return Promise.resolve()
                                                 return Reflect.apply(original, this, args)
                                         }),
                                 )

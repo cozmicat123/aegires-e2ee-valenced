@@ -1,5 +1,5 @@
 // AI-written glue (v1). Layout and components copied from human Valenced plugins:
-//  - page shell and TextInput/Button: anonymous-file-names/js/settings.tsx:1-73
+//  - page shell and TextInput/Button: anonymous-file-names/js/settings.tsx:1-71
 //  - TableSwitchRow: better-chat-buttons/js/settings.tsx:56-68
 //  - TableRadioGroup/TableRadioRow: better-chat-buttons/js/settings.tsx:81-95
 // Texts and rules mirror aliucord-e2ee@aegires-sync E2eeSettings.kt (password 8-256, preset radios).
@@ -74,6 +74,7 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
                                                 onPress={() => {
                                                         callNativeMethod('cozmicat123.e2ee.clearKey', [])
                                                         setHasKey(false)
+                                                        storage.set({ enabled: false })
                                                 }}
                                         />
                                         <Text>{hasKey ? 'Key set (kept in memory only).' : 'No key set.'}</Text>
@@ -83,7 +84,11 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
                                                 label="Encrypt my messages"
                                                 subLabel="Applies to the messages you send. You can read everyone else's messages regardless of profile. Preset channels always use AES-128-GCM."
                                                 value={enabled}
-                                                onValueChange={(v: boolean) => storage.set({ enabled: v })}
+                                                onValueChange={(v: boolean) => {
+                                                        // Aliucord plugin does the same: no encrypting until a key exists
+                                                        if (v && !hasKey) return setError('Set a key first')
+                                                        storage.set({ enabled: v })
+                                                }}
                                         />
                                 </TableRowGroup>
                                 <TableRadioGroup<number>
