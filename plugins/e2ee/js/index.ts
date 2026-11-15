@@ -6,6 +6,7 @@
 //  - jsonStorage wiring: anonymous-file-names/js/index.ts:39-44
 //  - redecrypt after Set key: valid-user/js/index.ts:54-83 (redrawMentions)
 // Behaviour mirrors cozmicat123/aliucord-e2ee@aegires-sync E2eePlugin.kt (Aegires MessageCryptoHelper).
+import { ToastActionCreators } from '@valenced/discord/actions'
 import { Dispatcher } from '@valenced/discord/common/flux'
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
@@ -21,6 +22,10 @@ export interface Settings {
 }
 
 export const ID = 'cozmicat123.e2ee'
+
+// Errors are shown as a toast, as in Aegires MessageCryptoHelper.java:42 and the Aliucord plugin's showToast.
+// Call shape: valenced-plugins better-invites/js/index.tsx:32, bio-emoji-button/js/picker.tsx:262
+const ToastKey = `${ID}.error`
 
 declare module '@valenced/modules/native' {
         interface NativeMethods {
@@ -156,7 +161,7 @@ export default plugin<{ jsonStorage: Settings }>({
                         const res = callNativeMethodSync('cozmicat123.e2ee.encrypt', [channelId, plain, selfId])
                         if (res === null) return true // encryption off for this channel
                         if (res.error || !res.text) {
-                                plugin.reportError(res.error ?? 'Encryption failed')
+                                ToastActionCreators.open(ToastKey, { text: res.error ?? 'Encryption failed' })
                                 return false
                         }
                         data.content = res.text
