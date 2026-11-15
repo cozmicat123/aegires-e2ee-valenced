@@ -8,7 +8,7 @@ import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withName, withProps } from '@valenced/modules/finders/filters'
 import { callNativeMethod, callNativeMethodSync } from '@valenced/modules/native'
-import { after, instead } from '@valenced/patcher'
+import { after, before, instead } from '@valenced/patcher'
 import SettingsComponent from './settings'
 
 export interface Settings {

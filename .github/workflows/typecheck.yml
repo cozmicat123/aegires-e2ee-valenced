@@ -1,0 +1,19 @@
+# AI-written glue. Steps copied from validate.yml (actions/checkout@v4, oven-sh/setup-bun@v2).
+# Catches what the bundler does not: a missing import or a wrong type fails the build here.
+name: Typecheck
+
+on:
+  push:
+    branches: [valenced-port]
+  workflow_dispatch:
+
+jobs:
+  tsc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install
+        env:
+          GITHUB_TOKEN: ${{ secrets.READ_PACKAGES_TOKEN }}
+      - run: bunx tsc -b plugins/e2ee/tsconfig.json
