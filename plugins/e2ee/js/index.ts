@@ -8,7 +8,7 @@ import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withName, withProps } from '@valenced/modules/finders/filters'
 import { callNativeMethod, callNativeMethodSync } from '@valenced/modules/native'
-import { instead } from '@valenced/patcher'
+import { after, instead } from '@valenced/patcher'
 import SettingsComponent from './settings'
 
 export interface Settings {
@@ -99,11 +99,6 @@ interface RowManager {
         prototype: { generate(args: { message?: any }): MessageRow }
 }
 
-// Last content checked per message id, so rows that were already handled skip the native call.
-// Encrypted messages are never added, so they are retried once a key is set.
-const checked = new Map<string, string>()
-const MAX_CHECKED = 5000
-
 interface MessageRow {
         type?: number
         message?: { id?: string; username?: string }
@@ -157,36 +152,17 @@ export default plugin<{ jsonStorage: Settings }>({
                 )
 
                 cleanup(
-                        // modules/messages/native/renderer/RowGenerator.tsx. Hook shape from message-logger (instead + re-generate
-                        // with a substitute record). Decrypts messages that were fetched before the key was set.
+                        // modules/messages/native/renderer/RowGenerator.tsx, as in show-tag
                         getModules(withName<RowManager>('RowManager'), ({ prototype }) => {
                                 cleanup(
-                                        instead(prototype, 'generate', function (args, original) {
-                                                const msg = args[0]?.message
-                                                if (msg?.id && typeof msg.content === 'string' && checked.get(msg.id) !== msg.content) {
-                                                        try {
-                                                                const channelId = msg.channel_id ?? msg.channelId
-                                                                const [r] = callNativeMethodSync('cozmicat123.e2ee.decrypt', [
-                                                                        [[msg.content, channelId, msg.author?.id ?? null]],
-                                                                ])
-                                                                if (r.enc) {
-                                                                        encryptedIds.add(msg.id)
-                                                                        if (r.text !== null) {
-                                                                                const copy = Object.assign(Object.create(Object.getPrototypeOf(msg)), msg, {
-                                                                                        content: r.text,
-                                                                                })
-                                                                                args = [{ ...args[0], message: copy }] as typeof args
-                                                                        }
-                                                                } else {
-                                                                        checked.set(msg.id, msg.content)
-                                                                        if (checked.size > MAX_CHECKED) checked.delete(checked.keys().next().value!)
-                                                                }
-                                                        } catch (e) {
-                                                                dbg.last = `row: ${e}`
-                                                        }
-                                                }
-
-                                                const row = original.apply(this, args)
+                                        // Already-cached messages: decrypt when the list (re)builds a row. Same idea as the Aliucord
+                                        // plugin's `before onConfigure { decrypt(it) }`; hook form from anonymous-file-names (`before`).
+                                        before(prototype, 'generate', args => {
+                                                const m = args[0]?.message
+                                                if (m && typeof m.content === 'string') decryptMessages([m], m.channelId)
+                                                return args
+                                        }),
+                                        after(prototype, 'generate', row => {
                                                 const m = row?.type === MessageRowType ? row.message : undefined
                                                 if (!m?.id || m.username == null || !encryptedIds.has(m.id)) return row
                                                 return { ...row, message: { ...m, username: LOCK + m.username } }
