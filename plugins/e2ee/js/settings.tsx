@@ -10,8 +10,8 @@ import { useEffect, useState } from 'react'
 import { ScrollView, Text } from 'react-native'
 import type { PluginSettingsComponent } from '@valenced/plugins/types'
 import type { ComponentProps } from 'react'
+import { redecrypt } from './messages'
 import type { Settings } from '.'
-import { redecrypt } from '.'
 
 const { Button, Stack, TableRadioGroup, TableRadioRow, TableRowGroup, TableSwitchRow, TextInput } = Design
 

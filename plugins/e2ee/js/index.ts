@@ -4,17 +4,15 @@
 //  - Flux payload rewrite: clear-urls/index.tsx:104-111 (MESSAGE_CREATE). The LOAD_MESSAGES_SUCCESS shape ({ messages, channelId })
 //    has no human source; it is only verified by working on device
 //  - jsonStorage wiring: anonymous-file-names/js/index.ts:39-44
-//  - redecrypt after Set key: valid-user/js/index.ts:54-83 (redrawMentions)
 // Behaviour mirrors cozmicat123/aliucord-e2ee@aegires-sync E2eePlugin.kt (Aegires MessageCryptoHelper).
 import { ToastActionCreators } from '@valenced/discord/actions'
-import { Dispatcher } from '@valenced/discord/common/flux'
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withName, withProps } from '@valenced/modules/finders/filters'
 import { callNativeMethod, callNativeMethodSync } from '@valenced/modules/native'
 import { after, before, instead } from '@valenced/patcher'
+import { decryptMessages, encryptedIds } from './messages'
 import SettingsComponent from './settings'
-import type { DiscordModules } from '@valenced/discord/types'
 
 export interface Settings {
         enabled: boolean
@@ -49,80 +47,6 @@ interface MessageActions {
         editMessage(channelId: string, messageId: string, message: { content: string }): unknown
 }
 
-// Flux message objects (snake_case, as sent by the gateway)
-interface FluxMessage {
-        id?: string
-        content?: string
-        channel_id?: string
-        author?: { id?: string }
-        referenced_message?: FluxMessage | null
-}
-
-// Ids of messages that were sent encrypted (Aegires Message.encrypted). Capped so it cannot grow forever.
-const encryptedIds = new Set<string>()
-const MAX_IDS = 5000
-
-// Same test as Crypto.looksEncrypted (Crypto.java: PREFIX line 65, looksEncrypted 83-85; pinned dddead0 "\u00A7"). Checked here so plain rows never cross the bridge.
-const looksEncrypted = (s: unknown): s is string => typeof s === 'string' && s.startsWith('\u00A7')
-
-// Replace encrypted content in place. The message and its reply preview go in one native call.
-function decryptMessages(messages: FluxMessage[], fallbackChannel?: string) {
-        const targets: FluxMessage[] = []
-        const items: [unknown, string, string | null][] = []
-        const isMain: boolean[] = []
-        const add = (m: FluxMessage | null | undefined, channel: string | undefined, main: boolean) => {
-                const channelId = m?.channel_id ?? channel
-                if (!m || !channelId || !looksEncrypted(m.content)) return
-                targets.push(m)
-                items.push([m.content, channelId, m.author?.id ?? null])
-                isMain.push(main)
-        }
-        for (const m of messages) {
-                add(m, fallbackChannel, true)
-                add(m.referenced_message, m.channel_id ?? fallbackChannel, false)
-        }
-        if (!items.length) return
-        let out: { text: string | null; enc: boolean }[]
-        try {
-                out = callNativeMethodSync('cozmicat123.e2ee.decrypt', [items])
-        } catch (e) {
-                console.warn('[e2ee] decrypt failed', e)
-                return
-        }
-        out.forEach(({ text, enc }, i) => {
-                if (text !== null) targets[i].content = text
-                const id = targets[i].id
-                if (enc && isMain[i] && id) {
-                        encryptedIds.add(id)
-                        if (encryptedIds.size > MAX_IDS) encryptedIds.delete(encryptedIds.values().next().value!)
-                }
-        })
-}
-
-// Rows keep what they were first built with, so a new key alone changes nothing (valid-user redrawMentions has the same
-// problem). Decrypt the loaded messages of the open channel and send the result back as a MESSAGE_UPDATE.
-export function redecrypt() {
-        const SelectedChannelStore = Stores.SelectedChannelStore as DiscordModules.Flux.Store<{
-                getChannelId(): string | undefined
-        }>
-        const channelId = SelectedChannelStore.getChannelId()
-        if (!channelId) return
-
-        const MessageStore = Stores.MessageStore as DiscordModules.Flux.Store<{
-                getMessages(channelId: string): { toArray(): FluxMessage[] }
-        }>
-        for (const { id, content, author } of MessageStore.getMessages(channelId).toArray()) {
-                if (!id || !looksEncrypted(content)) continue
-                const copy: FluxMessage = { id, content, channel_id: channelId, author: { id: author?.id } }
-                decryptMessages([copy])
-                if (copy.content === content) continue
-                Dispatcher.dispatch({
-                        type: 'MESSAGE_UPDATE',
-                        message: { id, channel_id: channelId, content: copy.content },
-                })
-        }
-}
-
 // Aegires MessageBinder.java:46 puts a lock before the time; here it goes before the name (show-tag hooks the same row field)
 const LOCK = '\uD83D\uDD12 '
 const MessageRowType = 1
@@ -141,7 +65,7 @@ export default plugin<{ jsonStorage: Settings }>({
         start({ cleanup, jsonStorage: storage, plugin }) {
                 // The key lives in native memory only, so after a restart there is none. Start with encryption off;
                 // the settings page does not let it be turned on without a key.
-                // cache may not be loaded yet here, so read through get() as fake-nitro fakeify.ts:40 does
+                // cache may not be loaded yet here, so read through get() as fake-nitro fakeify.ts:252 does
                 storage.get().then(
                         s => {
                                 if (s.enabled) storage.set({ enabled: false })
@@ -178,7 +102,7 @@ export default plugin<{ jsonStorage: Settings }>({
                         getModules(withProps<MessageActions>('sendMessage', 'editMessage'), messages => {
                                 cleanup(
                                         instead(messages, 'sendMessage', function (args, original) {
-                                                // Blocked: return a promise like the async sendMessage hooks in fake-nitro fakeify.ts:39,59
+                                                // Blocked: return a promise like the async sendMessage hook in fake-nitro fakeify.ts:248-256
                                                 if (!encryptOutgoing(args[0], args[1])) return Promise.resolve()
                                                 return Reflect.apply(original, this, args)
                                         }),
