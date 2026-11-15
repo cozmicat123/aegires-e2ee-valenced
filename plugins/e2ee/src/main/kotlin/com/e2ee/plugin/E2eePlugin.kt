@@ -89,16 +89,15 @@ val e2eePlugin = plugin {
             }
         }
 
-        // [[content, channelId, authorId?], ...] -> [plain | null, ...]; null = leave the message as is
+        // [[content, channelId, authorId?], ...] -> [{ text: plain | null, enc: Boolean }, ...]
+        // text null = leave the message as is. enc = looksEncrypted(content), same rule as Aegires Message.encrypted.
         registerNativeMethod("$id.decrypt") { args ->
             (args[0] as List<*>).map { item ->
                 val (content, channelId, author) = (item as List<*>)
+                val enc = content is String && Crypto.looksEncrypted(content)
                 val k = E2ee.keyFor(channelId as String)
-                if (k == null || content !is String || !Crypto.looksEncrypted(content)) {
-                    null
-                } else {
-                    Crypto.decrypt(content, k, channelId, author as String?)
-                }
+                val text = if (k == null || !enc) null else Crypto.decrypt(content as String, k, channelId, author as String?)
+                mapOf("text" to text, "enc" to enc)
             }
         }
     }

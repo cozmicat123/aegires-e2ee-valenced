@@ -6,9 +6,9 @@
 // Behaviour mirrors cozmicat123/aliucord-e2ee@aegires-sync E2eePlugin.kt (Aegires MessageCryptoHelper).
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
-import { withProps } from '@valenced/modules/finders/filters'
+import { withName, withProps } from '@valenced/modules/finders/filters'
 import { callNativeMethod, callNativeMethodSync } from '@valenced/modules/native'
-import { instead } from '@valenced/patcher'
+import { after, instead } from '@valenced/patcher'
 import SettingsComponent from './settings'
 
 export interface Settings {
@@ -30,7 +30,7 @@ declare module '@valenced/modules/native' {
                 ]
                 'cozmicat123.e2ee.decrypt': [
                         args: [items: [content: unknown, channelId: string, authorId: string | null][]],
-                        returnValue: (string | null)[],
+                        returnValue: { text: string | null; enc: boolean }[],
                 ]
         }
 }
@@ -42,36 +42,67 @@ interface MessageActions {
 
 // Flux message objects (snake_case, as sent by the gateway)
 interface FluxMessage {
+        id?: string
         content?: string
         channel_id?: string
         author?: { id?: string }
         referenced_message?: FluxMessage | null
 }
 
+// Ids of messages that were sent encrypted (Aegires Message.encrypted). Capped so it cannot grow forever.
+const encryptedIds = new Set<string>()
+const MAX_IDS = 5000
+
 // Replace encrypted content in place. The message and its reply preview go in one native call.
 function decryptMessages(messages: FluxMessage[], fallbackChannel?: string) {
         const targets: FluxMessage[] = []
         const items: [unknown, string, string | null][] = []
-        const add = (m: FluxMessage | null | undefined, channel?: string) => {
+        const isMain: boolean[] = []
+        const add = (m: FluxMessage | null | undefined, channel: string | undefined, main: boolean) => {
                 const channelId = m?.channel_id ?? channel
                 if (!m || !channelId) return
                 targets.push(m)
                 items.push([m.content, channelId, m.author?.id ?? null])
+                isMain.push(main)
         }
         for (const m of messages) {
-                add(m, fallbackChannel)
-                add(m.referenced_message, m.channel_id ?? fallbackChannel)
+                add(m, fallbackChannel, true)
+                add(m.referenced_message, m.channel_id ?? fallbackChannel, false)
         }
         if (!items.length) return
         const out = callNativeMethodSync('cozmicat123.e2ee.decrypt', [items])
-        out.forEach((plain, i) => {
-                if (plain !== null) targets[i].content = plain
+        out.forEach(({ text, enc }, i) => {
+                if (text !== null) targets[i].content = text
+                const id = targets[i].id
+                if (enc && isMain[i] && id) {
+                        encryptedIds.add(id)
+                        if (encryptedIds.size > MAX_IDS) encryptedIds.delete(encryptedIds.values().next().value!)
+                }
         })
+}
+
+// Aegires MessageBinder.java:46 puts a lock before the time; here it goes before the name (show-tag hooks the same row field)
+const LOCK = '\uD83D\uDD12 '
+const MessageRowType = 1
+
+interface RowManager {
+        prototype: { generate(row: unknown): MessageRow }
+}
+
+interface MessageRow {
+        type?: number
+        message?: { id?: string; username?: string }
 }
 
 export default plugin<{ jsonStorage: Settings }>({
         jsonStorage: { load: true, default: { enabled: false, preset: 2 } },
         start({ cleanup, jsonStorage: storage, plugin }) {
+                // The row hook needs the message list to be built after it is installed
+                if (plugin.startedLate) {
+                        plugin.requireReload()
+                        return
+                }
+
                 // Fails closed: returns false when the message must not be sent
                 const encryptOutgoing = (channelId: string, data: { content?: string } | undefined) => {
                         const plain = data?.content?.trim()
@@ -101,6 +132,19 @@ export default plugin<{ jsonStorage: Settings }>({
                                         instead(messages, 'editMessage', function (args, original) {
                                                 if (!encryptOutgoing(args[0], args[2])) return
                                                 return Reflect.apply(original, this, args)
+                                        }),
+                                )
+                        }),
+                )
+
+                cleanup(
+                        // modules/messages/native/renderer/RowGenerator.tsx, as in show-tag
+                        getModules(withName<RowManager>('RowManager'), ({ prototype }) => {
+                                cleanup(
+                                        after(prototype, 'generate', row => {
+                                                const m = row?.type === MessageRowType ? row.message : undefined
+                                                if (!m?.id || m.username == null || !encryptedIds.has(m.id)) return row
+                                                return { ...row, message: { ...m, username: LOCK + m.username } }
                                         }),
                                 )
                         }),
