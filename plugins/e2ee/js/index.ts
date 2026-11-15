@@ -57,6 +57,9 @@ export const dbg = { hooks: '', send: 0, edit: 0, flux: 0, cache: '', last: '', 
 const encryptedIds = new Set<string>()
 const MAX_IDS = 5000
 
+// Same test as Crypto.looksEncrypted (Crypto.java:35-37, PREFIX = "\u00A7"). Checked here so plain rows never cross the bridge.
+const looksEncrypted = (s: unknown): s is string => typeof s === 'string' && s.startsWith('\u00A7')
+
 // Replace encrypted content in place. The message and its reply preview go in one native call.
 function decryptMessages(messages: FluxMessage[], fallbackChannel?: string) {
         const targets: FluxMessage[] = []
@@ -64,7 +67,7 @@ function decryptMessages(messages: FluxMessage[], fallbackChannel?: string) {
         const isMain: boolean[] = []
         const add = (m: FluxMessage | null | undefined, channel: string | undefined, main: boolean) => {
                 const channelId = m?.channel_id ?? channel
-                if (!m || !channelId) return
+                if (!m || !channelId || !looksEncrypted(m.content)) return
                 targets.push(m)
                 items.push([m.content, channelId, m.author?.id ?? null])
                 isMain.push(main)

@@ -70,12 +70,10 @@ val e2eePlugin = plugin {
         // [password: String] -> Boolean. Argon2id is heavy, so this runs off the RN thread.
         registerNativeAsyncMethod("$id.setKey") { args ->
             val password = args[0] as String
-            if (password.length !in 8..256) {
-                false
-            } else {
-                E2ee.key = Crypto.deriveKey(password)
-                true
-            }
+            // deriveKey returns null on any failure (Crypto.java:51-67); keep the old key then
+            val derived = if (password.length in 8..256) Crypto.deriveKey(password) else null
+            if (derived != null) E2ee.key = derived
+            derived != null
         }
 
         registerNativeMethod("$id.clearKey") { _ ->
