@@ -11,6 +11,7 @@ import { ScrollView, Text } from 'react-native'
 import type { PluginSettingsComponent } from '@valenced/plugins/types'
 import type { ComponentProps } from 'react'
 import type { Settings } from '.'
+import { redecrypt } from '.'
 
 const { Button, Stack, TableRadioGroup, TableRadioRow, TableRowGroup, TableSwitchRow, TextInput } = Design
 
@@ -35,6 +36,7 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
                         setError(ok ? '' : `Password must be 8-256 characters (got ${password.length})`)
                         if (ok) {
                                 setHasKey(true)
+                                redecrypt()
                                 setPassword('')
                                 // The input is uncontrolled, so a new key empties it
                                 setNonce(n => n + 1)

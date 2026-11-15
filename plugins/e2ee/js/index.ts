@@ -3,13 +3,16 @@
 //  - module lookup: gif-to-chat-input/index.ts:27-35
 //  - Flux payload rewrite: clear-urls/index.tsx:64-71, event shapes from klipy-gif-fix/js/index.ts:335-338
 //  - jsonStorage wiring: anonymous-file-names/js/index.ts:41-47
+//  - redecrypt after Set key: valid-user/js/index.ts:51-80 (redrawMentions)
 // Behaviour mirrors cozmicat123/aliucord-e2ee@aegires-sync E2eePlugin.kt (Aegires MessageCryptoHelper).
+import { Dispatcher } from '@valenced/discord/common/flux'
 import { onFluxEventDispatched, Stores } from '@valenced/discord/flux'
 import { getModules } from '@valenced/modules/finders'
 import { withName, withProps } from '@valenced/modules/finders/filters'
 import { callNativeMethod, callNativeMethodSync } from '@valenced/modules/native'
 import { after, before, instead } from '@valenced/patcher'
 import SettingsComponent from './settings'
+import type { DiscordModules } from '@valenced/discord/types'
 
 export interface Settings {
         enabled: boolean
@@ -88,6 +91,30 @@ function decryptMessages(messages: FluxMessage[], fallbackChannel?: string) {
                         if (encryptedIds.size > MAX_IDS) encryptedIds.delete(encryptedIds.values().next().value!)
                 }
         })
+}
+
+// Rows keep what they were first built with, so a new key alone changes nothing (valid-user redrawMentions has the same
+// problem). Decrypt the loaded messages of the open channel and send the result back as a MESSAGE_UPDATE.
+export function redecrypt() {
+        const SelectedChannelStore = Stores.SelectedChannelStore as DiscordModules.Flux.Store<{
+                getChannelId(): string | undefined
+        }>
+        const channelId = SelectedChannelStore.getChannelId()
+        if (!channelId) return
+
+        const MessageStore = Stores.MessageStore as DiscordModules.Flux.Store<{
+                getMessages(channelId: string): { toArray(): FluxMessage[] }
+        }>
+        for (const { id, content, author } of MessageStore.getMessages(channelId).toArray()) {
+                if (!id || !looksEncrypted(content)) continue
+                const copy: FluxMessage = { id, content, channel_id: channelId, author: { id: author?.id } }
+                decryptMessages([copy])
+                if (copy.content === content) continue
+                Dispatcher.dispatch({
+                        type: 'MESSAGE_UPDATE',
+                        message: { id, channel_id: channelId, content: copy.content },
+                })
+        }
 }
 
 // Aegires MessageBinder.java:46 puts a lock before the time; here it goes before the name (show-tag hooks the same row field)
