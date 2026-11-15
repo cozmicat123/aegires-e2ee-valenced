@@ -24,6 +24,7 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
         const [hasKey, setHasKey] = useState(false)
         const [busy, setBusy] = useState(false)
         const [diag, setDiag] = useState('')
+        const [nonce, setNonce] = useState(0)
 
         useEffect(() => {
                 callNativeMethod('cozmicat123.e2ee.hasKey', []).then(setHasKey, e => setError(String(e)))
@@ -33,9 +34,13 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
                 setBusy(true)
                 try {
                         const ok = await callNativeMethod('cozmicat123.e2ee.setKey', [password])
-                        setError(ok ? '' : 'Password must be 8-256 characters')
-                        setHasKey(ok)
-                        if (ok) setPassword('')
+                        setError(ok ? '' : `Password must be 8-256 characters (got ${password.length})`)
+                        if (ok) {
+                                setHasKey(true)
+                                setPassword('')
+                                // The input is uncontrolled, so a new key empties it
+                                setNonce(n => n + 1)
+                        }
                 } catch (e) {
                         setError(String(e))
                 } finally {
@@ -48,6 +53,7 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
                         <Page>
                                 <Stack>
                                         <TextInput
+                                                key={nonce}
                                                 label="Password"
                                                 placeholder="8-256 characters"
                                                 defaultValue=""
