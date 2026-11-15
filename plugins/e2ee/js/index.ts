@@ -141,7 +141,11 @@ export default plugin<{ jsonStorage: Settings }>({
         start({ cleanup, jsonStorage: storage, plugin }) {
                 // The key lives in native memory only, so after a restart there is none. Start with encryption off;
                 // the settings page does not let it be turned on without a key.
-                if (storage.cache?.enabled) storage.set({ enabled: false })
+                // cache may not be loaded yet here, so read through get() as fake-nitro fakeify.ts:40 does
+                storage.get().then(
+                        s => s.enabled && storage.set({ enabled: false }),
+                        e => plugin.reportError(e),
+                )
 
                 // The row hook needs the message list to be built after it is installed
                 if (plugin.startedLate) {
