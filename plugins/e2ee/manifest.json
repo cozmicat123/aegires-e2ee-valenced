@@ -1,0 +1,18 @@
+{
+  "format": 1,
+  "id": "cozmicat123.e2ee",
+  "name": "E2EE",
+  "description": "End-to-end encryption compatible with Aegires.",
+  "author": "cozmicat123",
+  "version": "0.1.0",
+  "dependencies": {
+    "valenced.api": ">=1 <2",
+    "discord": "*"
+  },
+  "dist": {
+    "android": {
+      "path": "plugin.jar",
+      "class": "com.e2ee.plugin.E2eePlugin"
+    }
+  }
+}
