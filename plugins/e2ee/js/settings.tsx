@@ -24,7 +24,7 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
         const [busy, setBusy] = useState(false)
 
         useEffect(() => {
-                callNativeMethod('cozmicat123.e2ee.hasKey', []).then(setHasKey)
+                callNativeMethod('cozmicat123.e2ee.hasKey', []).then(setHasKey, e => setError(String(e)))
         }, [])
 
         const setKey = async () => {
@@ -34,6 +34,8 @@ export default function SettingsComponent({ api: { jsonStorage: storage } }: Pro
                         setError(ok ? '' : 'Password must be 8-256 characters')
                         setHasKey(ok)
                         if (ok) setPassword('')
+                } catch (e) {
+                        setError(String(e))
                 } finally {
                         setBusy(false)
                 }
