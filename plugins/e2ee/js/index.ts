@@ -51,7 +51,7 @@ interface FluxMessage {
 }
 
 // TEMP diagnostics (AI glue), removed before release
-export const dbg = { hooks: '', send: 0, edit: 0, flux: 0, cache: '', last: '' }
+export const dbg = { hooks: '', send: 0, edit: 0, flux: 0, cache: '', last: '', rec: '' }
 
 // Ids of messages that were sent encrypted (Aegires Message.encrypted). Capped so it cannot grow forever.
 const encryptedIds = new Set<string>()
@@ -159,7 +159,13 @@ export default plugin<{ jsonStorage: Settings }>({
                                         // plugin's `before onConfigure { decrypt(it) }`; hook form from anonymous-file-names (`before`).
                                         before(prototype, 'generate', args => {
                                                 const m = args[0]?.message
-                                                if (m && typeof m.content === 'string') decryptMessages([m], m.channelId)
+                                                try {
+                                                        if (m && !dbg.rec)
+                                                                dbg.rec = `content=${typeof m.content} ch=${m.channel_id}|${m.channelId} id=${typeof m.id} keys=${Object.keys(m).slice(0, 40).join(',')}`
+                                                        if (m && typeof m.content === 'string') decryptMessages([m], m.channelId)
+                                                } catch (e) {
+                                                        dbg.last = `row: ${e}`
+                                                }
                                                 return args
                                         }),
                                         after(prototype, 'generate', row => {
